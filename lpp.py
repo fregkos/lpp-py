@@ -1,13 +1,16 @@
-import re, sys, getopt, json
-from numpy import array, shape, reshape
+import re
+import sys
+import getopt
+import json
+from numpy import array, squeeze, dot
 
 """
     Author
         Periklis Fregkos (https://github.com/Leajian)
     Program name
         Linear Problem Parser (lpp)
-    Creation Date
-        22/3/2019
+    Version
+        2.0
 """
 
 
@@ -27,28 +30,69 @@ Note that
 """
 termRe = re.compile('(?P<sign>[+-]?\s*)(?P<coefficient>\d*\s*)(?P<variable_name>[xX]{1}\d+\s*)')
 
+
 def openLP(fileName):
     with open(fileName, 'r') as file:
-        #Just note that read() function seeks until EOF, so if it's called again, it has nothing.
+        # Just note that read() function seeks until EOF, so if it's called again, it has nothing.
         problem = file.read()
 
-        #Simple sanity checks to avoid future problems
-        if not re.search('max|min', problem, re.IGNORECASE):
-            raise Exception('Expression "min" or "max" not found, include it in the beginning of problem\'s description.')
-        if not re.search('s\.t\.|st|subject\s*to', problem, re.IGNORECASE):
-            raise Exception('Expression "s.t." or "st" or "subject to" not found, include it after you state objective function.')
-        if not re.search('end', problem, re.IGNORECASE):
-            raise Exception('Expression "end" not found, include it after you end problem\'s description.')
+        # Simple sanity checks to avoid future problems and
+        # also
+        hasNaturalConstrains = sanityCheck(problem)
 
-        #Cut the file in 2 segments (#1 max/min - st, #2 st - end).
-        segmentedList = re.compile('s\.t\.|st|subject\s*to|end', re.IGNORECASE).split(problem)
+        # Cut the file in segments, from one keyword to another (#1 max/min, #2 st, # with, #3 end).
+        pattern = re.compile('s\.t\.|st|subject\s*to|with|end', re.IGNORECASE)
+        segmentedList = pattern.split(problem)
+        """
+        # Unless 'with' keyword is found, which means
+        # natural constraints are given indeed, we must return 3 parts.
+        withFound = False
+        if re.search('with', problem, re.IGNORECASE):
+            withFound = True
 
-        #We return only the first 2 parts, the other ones (from 2 and beyond) include the one with "end" delimiter,
-        #which might contain nothing, a new line character or more than that. We don't care about content
-        #past the "end" delimiter. Any other whitespace character is managed when necessary.
-        #The first part has the objective function (and possibly whitespace, but we don't mind).
-        #If there is any gibberish, the corresponding extractor function is responsible to figure it out.
+        if withFound:
+        """
+        return segmentedList[:3], hasNaturalConstrains
+
+        # We return only the first 2 parts, the other ones (from 2 and beyond) include the one with "end" delimiter,
+        # which might contain nothing, a new line character or more than that. We don't care about content
+        # past the "end" delimiter. Any other whitespace character is managed when necessary.
+        # The first part has the objective function (and possibly whitespace, but we don't mind).
+        # If there is any gibberish, the corresponding extractor function is responsible to figure it out.
         return segmentedList[:2]
+
+
+def sanityCheck(problem):
+    """
+        Checks for the existence of keywords and their correct corresponding positions.
+        It also returns a boolean which states if "with" expression was used.
+    """
+    hasNaturalConstrains = False
+    keywordPattern = re.compile('max|min|s\.t\.|st|subject\s*to|with|end', re.IGNORECASE)
+    keywords = re.findall(keywordPattern, problem)
+
+    if re.match('max|min', keywords[0], re.IGNORECASE):
+        if re.match('s\.t\.|st|subject\s*to', keywords[1], re.IGNORECASE):
+            if len(keywords) == 3:
+                print('WARNING! Expression "with" not found. Assuming all constrains are non-negative.')
+                if re.match('end', keywords[2], re.IGNORECASE):
+                    pass
+                else:
+                    raise Exception('Expression "end" not found, include it after you end problem\'s description.')
+            elif len(keywords) == 4:
+                if re.match('with', keywords[2], re.IGNORECASE):
+                    hasNaturalConstrains = True
+                    if re.match('end', keywords[3], re.IGNORECASE):
+                        pass
+                    else:
+                        raise Exception('Expression "end" not found, include it after you end problem\'s description.')
+        else:
+            raise Exception('Expression "s.t." or "st" or "subject to" not found, include it after you state objective function.')
+    else:
+        raise Exception('Expression "min" or "max" not found, include it in the beginning of problem\'s description.')
+
+    return hasNaturalConstrains
+
 
 def getMinMax(problem):
     """
@@ -67,7 +111,8 @@ def getMinMax(problem):
     else:
         raise Exception('Could not determine problem type.')
 
-def cVectorExctactor(problem):
+
+def cVectorExctactor(problem, vars):
     """
     Decription
         Returns a list of objective function's coefficients as floats.
@@ -77,18 +122,19 @@ def cVectorExctactor(problem):
         A numpy.array of floats
     """
 
-    #From the problem part (0), which contains the objective function, we use as delimiter
-    #the type of problem to split it into 2 parts. This is necessary because there might
-    #be noise from gibberish input.
+    # From the problem part (0), which contains the objective function, we use as delimiter
+    # the type of problem to split it into 2 parts. This is necessary because there might
+    # be noise from gibberish input.
     segmentedList = re.compile('max|min', re.IGNORECASE).split(problem[0])
 
-    #With the above method,we only take the second part (1), which contains information
-    #described after the min/max keyword that is our objective function. From now on,
-    #it's coefficientsExtractor function's responsibility to determine more input errors,
-    #which are more specific and beyond this function's job.
-    return array(coefficientsExtractor(segmentedList[1]))
+    # With the above method,we only take the second part (1), which contains information
+    # described after the min/max keyword that is our objective function. From now on,
+    # it's coefficientsExtractor function's responsibility to determine more input errors,
+    # which are more specific and beyond this function's job.
+    return array(coefficientsExtractor(segmentedList[1], vars))
 
-def constrainsExtractor(problem):
+
+def constrainsExtractor(problem, vars):
     """
     Decription
         Returns 3 lists as floats describing the problem's constraints details.
@@ -108,43 +154,50 @@ def constrainsExtractor(problem):
 
     constraintNo = 0
 
-    #problem[1] contains only the part of constraint(s), from s.t. keywords to end keyword.
-    #We could only pass that part as arguement, but readability counts.
+    # Remove excessive occurances of the newline character, because it's
+    # our delimiter for every constraint.
+    problem[1] = re.sub('\n+', '\n', problem[1])
+    # Also remove the newline at the beginning, if it exists.
+    if problem[1][0] == '\n':
+        problem[1] = problem[1][1:]
+
+    # problem[1] contains only the part of constraint(s), from s.t. keywords to end keyword.
+    # We could only pass that part as argument, but readability counts.
     expressions = problem[1].split('\n')
 
-    #Since we split with a new line character as a delimiter, the last element of our expressions list is
-    #always a null string, because it was '\n' before and split removed it.
-    #We are sure that this came clean and in this format, because openLP gave it that way.
+    # Since we split with a new line character as a delimiter, the last element of our expressions list is
+    # always a null string, because it was '\n' before and split removed it.
+    # We are sure that this came clean and in this format, because openLP gave it that way.
 
-
-    #We loop without the last null string as mentioned above.
+    # We loop without the last null string as mentioned above.
     for expression in expressions[:-1]:
-        #Count the constraints
+        # Count the constraints
         constraintNo += 1
 
-        #Find all inequalities and append them to our list.
+        # Find all inequalities and append them to our list.
         constraint = re.findall('<=|=|>=', expression)
         EqinTemp.append(constraint)
 
-        #We explicitly want one constraint per line, so if more than one is found or none, raise Exception.
         if len(constraint) != 1:
-            raise Exception('There was a problem parsing constraint No {}. Make sure you have one constraint per line.'.format(constraintNo))
+            raise Exception('There was a problem parsing constraint No {}. Make sure you have one constraint per line. Is "{}" a constraint?' .format(constraintNo, expression))
+            # If it was (or tried being) a constraint, then check if it really is a valid one.
 
-        #Split each expression into two parts, using inequalities as delimiters.
+        # Split each expression into two parts, using inequalities as delimiters.
         Ab = re.split('<=|=|>=', expression)
-        #Extract the coefficients from the first part (0).
-        leftPartCoefficients = coefficientsExtractor(Ab[0])
+        # Extract the coefficients from the first part (0).
+        leftPartCoefficients = coefficientsExtractor(Ab[0], vars)
         A.append(leftPartCoefficients)
-        #Extract the constants from the second part (1).
+        # Extract the constants from the second part (1).
         b.append(float(Ab[1]))
 
-        #Check for each constraint if it's correctly defined
+        # Check for each constraint if it's correctly defined
         if len(leftPartCoefficients) < 1:
-            raise Exception('Constraint No {} has no left part and it\'s invalid.'.format(constraintNo))
+            # We explicitly want one constraint per line, so if more than one is found or none, raise Exception.
+            raise Exception('Constraint No {} has no left part and it\'s invalid.' .format(constraintNo))
         if len(Ab[1]) < 1:
-            raise Exception('Constraint No {} has no right part and it\'s invalid.'.format(constraintNo))
+            raise Exception('Constraint No {} has no right part and it\'s invalid.' .format(constraintNo))
 
-    #Create a new list of Eqin containing inequalities in the format we want.
+    # Create a new list of Eqin containing inequalities in the format we want.
     for eq in EqinTemp:
         if eq[0] == '<=':
             Eqin.append(-1)
@@ -155,7 +208,8 @@ def constrainsExtractor(problem):
 
     return array(A), array(Eqin).reshape(len(Eqin), 1), array(b).reshape(len(b), 1)
 
-def coefficientsExtractor(expression):
+
+def coefficientsExtractor(expression, vars):
     """
     Decription
         Returns a list of coefficients as floats from an expression. It automatically takes care
@@ -165,39 +219,88 @@ def coefficientsExtractor(expression):
     Output
         a list of parsed coefficients as floats
     """
-    #Remove any kind of whitespace [ \t\n\r\f\v] from the expression.
+    # Remove any kind of whitespace [ \t\n\r\f\v] from the expression.
     clean = re.sub('\s+', '', expression)
 
-    #Make a list of each term (see termRegex for explanation).
+    # Make a list of each term (see termRegex for explanation).
     terms = termRe.findall(clean)
 
-    #Initialize final list.
-    signedCoefficients = []
-    #signedCoefficients = {}
+    # Initialize final dicitonary. If a variable exists, it's not zero.
+    signedCoefficients = dict(zip(vars, [0 for i in vars]))
 
     for term in terms:
-        #The only reason for sign to be omitted is at the beginning (the first term), otherwise it is
-        #a term multiplied by another, in other words, it's not linear.
+        # The only reason for sign to be omitted is at the beginning (the first term), otherwise it is
+        # a term multiplied by another, in other words, it's not linear.
         if term != terms[0] and term[0] == '':
             raise Exception('expression {} is non-linear. Fix term {}.' .format(''.join(clean), ''.join(term)))
 
-        #Create a list of strings containing [sign, value], so that we can append it as a casted float.
+        # Create a list of strings containing [sign, value], so that we can append it as a casted float.
         aTerm = [term[0], term[1]]
 
-        #Special case where 1 coefficient is omiitted
+        # Special case where 1 coefficient is omiitted
         if term[1] == '':
             aTerm[1] = '1'
 
-        #optional: Return a dictionary like {'x1': 1.0, 'x2': 1.0, 'x3': -4.0}
-        #signedCoefficients[term[2]] = (float(aTerm[0] + aTerm[1]))
+        # Return a dictionary like {'x1': 1.0, 'x2': 1.0, 'x3': -4.0}
+        signedCoefficients[term[2]] = (float(aTerm[0] + aTerm[1]))  # Casting takes care for omitted sign of the number.
 
-        #Casting takes care for omitted sign of the number.
-        signedCoefficients.append(float(aTerm[0] + aTerm[1]))
+    return list(signedCoefficients.values())
 
-    #print(signedCoefficients)
-    return signedCoefficients
 
-def writeLP2(MinMax, c, A, Eqin, b, inputFile, outputName=''):
+def naturalConstraintsExtractor(problem, vars, hasNaturalConstrains=False):
+    # If a natural constraint for a variable is not given, we assume it's x ≥ 0.
+    naturalConstraints = dict(zip(vars, [1 for i in vars]))
+
+    # If no natural constrains are specified, then return prematurely with the assumption.
+    if not hasNaturalConstrains:
+        return [i for i in naturalConstraints.values()]
+
+    constraintNo = 0
+
+    # Remove excessive occurances of the newline character, because it's
+    # our delimiter for every constraint.
+    problem[2] = re.sub('\n+', '\n', problem[2])
+    # Also remove the newline at the beginning, if it exists.
+    if problem[2][0] == '\n':
+        problem[2] = problem[2][1:]
+
+    # problem[2] contains only the part of natural constraint(s), from s.t. keywords to with keyword.
+    # We could only pass that part as argument, but readability counts.
+    expressions = problem[2].split('\n')
+
+    # Since we split with a new line character as a delimiter, the last element of our expressions list is
+    # always a null string, because it was '\n' before and split removed it.
+    # We are sure that this came clean and in this format, because openLP gave it that way.
+
+    # We loop without the last null string as mentioned above.
+    for expression in expressions[:-1]:
+        # Count the constraints
+        constraintNo += 1
+
+        # Find all natures.
+        constraintRe = re.compile('\s*(\w*)\s*(<=|>=|free).*', re.IGNORECASE)
+        constraint = re.findall(constraintRe, expression)
+
+        # If the natural constraint is about a known variable, check it.
+        # Any arbitarities are ignored. We are planning ahead as always (hopefully).
+        if constraint[0][0] in vars:
+            if constraint[0][1] == '<=':
+                nature = -1
+            elif constraint[0][1] == '>=':
+                nature = 1
+            elif constraint[0][1].lower() == 'free':
+                nature = 0
+            # Place the natures of the corresponding variable to our dictionary.
+            naturalConstraints[constraint[0][0]] = nature
+
+        # We explicitly want one constraint per line, so if more than one is found or none, raise Exception.
+        if len(constraint) != 1:
+            raise Exception('\tThere was a problem parsing natural constraint No {}.\n\t\tMake sure you have one natural constraint per line.' .format(constraintNo))
+
+    return [i for i in naturalConstraints.values()]
+
+
+def writeLP2(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputName=''):
     if outputName == '':
         outputName = '(LP-2)' + inputFile
     with open(outputName, 'w+') as output:
@@ -208,12 +311,15 @@ def writeLP2(MinMax, c, A, Eqin, b, inputFile, outputName=''):
             output.write('min\n')
         """
         output.write('MinMax = ' + str(MinMax) + '\n\n')
-        output.write('c =\n' + str(array(c)) + '\n\n') # 1 x n
-        output.write('A =\n' + str(array(A)) + '\n\n') # m x n
-        output.write('Eqin =\n' + str(array(Eqin).reshape(len(Eqin), 1)) + '\n\n') #m x 1
-        output.write('b =\n' + str(array(b).reshape(len(b), 1))) #m x 1
+        output.write('c =\n' + str(array(c)) + '\n\n')  # 1 x n
+        output.write('A =\n' + str(array(A)) + '\n\n')  # m x n
+        output.write('Eqin =\n' + str(array(Eqin).reshape(len(Eqin), 1)) + '\n\n')  # m x 1
+        output.write('b =\n' + str(array(b).reshape(len(b), 1)) + '\n\n')  # m x 1
+        if naturalConstraints:
+            output.write('naturalConstraints =\n' + str(naturalConstraints) + '\n\n')  # 1 x n
 
-def writeLP2json(MinMax, c, A, Eqin, b, inputFile, outputName=''):
+
+def writeLP2json(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputName=''):
     if outputName == '':
         outputName = '(LP-2)' + inputFile + '.json'
         problem = {
@@ -235,8 +341,12 @@ def writeLP2json(MinMax, c, A, Eqin, b, inputFile, outputName=''):
                 'dimensions': b.shape
                 }
             }
+        if naturalConstraints:
+            problem['naturalConstraints'] = naturalConstraints
+
     with open(outputName, 'w+') as output:
-        json.dump(problem, output)
+        json.dump(problem, output, indent=4)
+
 
 def loadLP2json(inputFile):
     """
@@ -248,37 +358,122 @@ def loadLP2json(inputFile):
     Output
         In a list
             As floats
-                int     MinMax  containing constraints' coefficients
-                list    c       containing linear problem's coefficients array and its dimensions
-                list    A       containing constraints' coefficients array and its dimensions
-                list    Eqin    containing constraints' inequalities array and its dimensions
-                list    b       containing constraints' constant parts array and its dimensions
+                int     MinMax              containing constraints' coefficients
+                list    c                   containing linear problem's coefficients array and its dimensions
+                list    A                   containing constraints' coefficients array and its dimensions
+                list    Eqin                containing constraints' inequalities array and its dimensions
+                list    b                   containing constraints' constant parts array and its dimensions
+                list    naturalConstraints  containing natural constraints
     """
     with open(inputFile, 'r') as input:
         problem = json.load(input)
-    #return problem['MinMax'], problem['c'], problem['A'], problem['Eqin'], problem['b']
+    #return problem['MinMax'], problem['c'], problem['A'], problem['Eqin'], problem['b'], naturalConstraints
     return problem
+
+
+def discoverVariables(list, varSet):
+    """
+    Decription
+        Discovers and adds variable names to a set from a given list.
+    Input
+        A list with expressions and a set for variable names.
+    Output
+        Nothing, it just edits the given set.
+    """
+    for expression in list:
+        # Remove any kind of whitespace [ \t\n\r\f\v] from the expression.
+        clean = re.sub('\s+', '', expression)
+
+        # Make a list of each term (see termRegex for explanation).
+        terms = termRe.findall(clean)
+
+        for term in terms:
+            # The only reason for sign to be omitted is at the beginning (the first term), otherwise it is
+            # a term multiplied by another, in other words, it's not linear.
+            if term != terms[0] and term[0] == '':
+                raise Exception('expression {} is non-linear. Fix term {}.' .format(''.join(clean), ''.join(term)))
+
+            # Add any newly discovered variable to the set.
+            varSet.add(term[2])
+
+
+def discoverProblemVariables(problem):
+    """
+    Decription
+        Discovers all diffirent variables from a given linear problem.
+    Input
+        a problem opened with openLP
+    Output
+        A sorted list with variable names.
+    """
+
+    # The first part (0) contains the c vectorand the problem type.
+    c = problem[0]
+    # problem[1] contains only the part of constraint(s), from s.t. keywords to (with keyword if it exists) end keyword.
+    A = problem[1].split('\n')
+
+    # A set of all discovered variables.
+    varSet = set()
+
+    discoverVariables(c, varSet)
+    discoverVariables(A, varSet)
+
+    return sorted(varSet)  # Returns an ordered list.
+
+
+def primalToDual(MinMax, c, A, Eqin, b, naturalConstraints=[]):
+    # Natural constraints legend:
+    #   0   means   Free
+    #   1   means   x ≥ 0
+    #  -1   means   x ≤ 0
+
+    # If natural constraints are not given, we assume the are all x ≥ 0.
+    if not naturalConstraints:
+        naturalConstraints = [1 for i in Eqin]
+
+    # Convert Min to Max and vice-versa.
+    dualType = MinMax * -1
+    # Proper transposing, numpy is weird, keep reading...
+    dual_c = squeeze(b.reshape(1, len(b)))
+    dual_b = c.reshape(len(c), 1)
+
+    w = A.transpose()
+
+    if dualType == 1:  # Min ↔ Max
+        dualEqin = Eqin
+        dualNaturalConstraints = [x * -1 for x in naturalConstraints]
+    elif dualType == -1:  # Max ↔ Min
+        dualEqin = dot(-1, Eqin)
+        dualNaturalConstraints = naturalConstraints
+
+    return dualType, dual_c, w, dualEqin, dual_b, dualNaturalConstraints
+
 
 def main(argv):
 
     inputFile = ''
     outputFile = ''
     exportAsJSON = False
+    dual = False
 
     try:
-        opts, args = getopt.getopt(argv[1:], 'hji:o:', ['input=', 'output='])
+        opts, args = getopt.getopt(argv[1:], 'hji:o:d', ['input=', 'output='])
     except getopt.GetoptError:
         print('Usage: ' + argv[0] + ' -i <inputFile> [options]')
+        print('For more options, type: ' + argv[0] + ' -h')
         sys.exit(2)
 
+    ## BUG: Can't use -o and -j together.
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             print('Usage: ' + argv[0] + ' -i <inputFile> [options]')
             print('''
-    Options:
-        -j <json>        : export problem in JSON format
-        -o <outputFile>  : define output file name (Default: '(LP-2)<inputFile>')
-            ''')
+Options:
+    -j, --json                : export problem in JSON format
+    -o, --output <outputFile> : define output file name
+                                (Default: '(LP-2)<inputFile>')
+    -d, --dual                : convert the problem from primal to dual form
+''')
             sys.exit()
         elif opt in ('-i', '--input'):
             inputFile = arg
@@ -287,28 +482,40 @@ def main(argv):
         elif opt in ('-j', '--json'):
             outputFile = arg
             exportAsJSON = True
+        elif opt in ('-d', '--dual'):
+            dual = True
         else:
             print('Usage: ' + argv[0] + ' -i <inputFile> [options]')
             sys.exit(2)
 
+    problem, hasNaturalConstrains = openLP(inputFile)
+    vars = discoverProblemVariables(problem)
 
-    problem = openLP(inputFile)
+    # Call order matters, as all functions access the initial problem list.
     MinMax = getMinMax(problem)
-    c = cVectorExctactor(problem)
-    A, Eqin, b = constrainsExtractor(problem)
+    c = cVectorExctactor(problem, vars)
+    A, Eqin, b = constrainsExtractor(problem, vars)
+    naturalConstraints = naturalConstraintsExtractor(problem, vars, hasNaturalConstrains)
+
+    if dual:
+        MinMax, c, A, Eqin, b, naturalConstraints = primalToDual(MinMax, c, A, Eqin, b)
 
     """
     print(MinMax)
+    print(c)
     print(A)
     print(Eqin)
     print(b)
-    print(c)
+    print(naturalConstraints)
     """
 
     if exportAsJSON:
-        writeLP2json(MinMax, c, A, Eqin, b, inputFile, outputFile)
+        writeLP2json(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputFile)
     else:
-        writeLP2(MinMax, c, A, Eqin, b, inputFile, outputFile)
+        print('WARNING! This output is not meant for parsing, it\'s unreliable.')
+        print('It\'s only for demonstration purposes!\nUse --json for JSON format instead.')
+
+        writeLP2(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputFile)
 
 
 if __name__ == '__main__':
