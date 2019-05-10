@@ -1,6 +1,7 @@
 # lpp-py
-Linear problem parser in Python
-##Usage
+Linear problem parser in Python.
+
+## Usage
 ```
 lpp.py -i <inputFile> [options]
 ```
