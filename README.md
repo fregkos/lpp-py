@@ -3,7 +3,7 @@ Linear problem parser in Python.
 
 ## Usage
 ```
-lpp.py -i <inputFile> [options]
+python3 lpp.py -i <inputFile> [options]
 ```
 ### Example usage:
 ```
