@@ -46,4 +46,4 @@ Otherwise, the input file should follow some specific rules. Take a look below a
 * Whitespace is irrelevant.
 * Optionally, you can use the keyword `with` and state the natural constraints per line. To do so, state the variable name, then type `free` or `>=0` or `<=0`.
 * You must ALWAYS type the `end` keyword when you are done.
-* You can potentially write whatever else you like in the file and the parser will do it's utmost best to ignore them and only parse what it cares about. Take a look at the examples folder, there are some examples that cover most cases and answer additional questions you might have.
+* You can potentially write whatever else you like in the file and the parser will do it's utmost best to ignore them and only parse what it cares about. Take a look at the [examples folder](/examples), there are some examples that cover most cases and answer additional questions you might have.
