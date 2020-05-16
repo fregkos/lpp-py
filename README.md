@@ -1,5 +1,7 @@
 # lpp-py
-Linear problem parser in Python.
+Linear problem parser and dual converter in Python.
+
+**YOU NEED [numpy](https://pypi.org/project/numpy/) FOR THE PROGRAM TO WORK. INSTALL IT WITH `pip install numpy`**
 
 ## Usage
 ```
@@ -29,7 +31,6 @@ or
 ```
 python3 lpp.py --help
 ```
-
 
 ## About input files:
 You can either load an already saved json file, created with this program via `-l` or `--load`, but should be used instead of `-i` or `--input`.
