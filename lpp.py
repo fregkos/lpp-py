@@ -21,14 +21,14 @@ def main(argv):
     # Initialize varibales.
     inputFile = ''
     outputFile = ''
-    exportAsJSON = False
     loadJSON = False
+    exportType = 'default'
     dual = False
     justPrint = False
 
     ## BUG: Can't use -o and -j together.
     try:
-        opts, args = getopt.getopt(argv[1:], 'hjpi:o:dl:', ['input=', 'output=', 'load='])
+        opts, args = getopt.getopt(argv[1:], 'hjpsi:o:dl:', ['input=', 'output=', 'load='])
     except getopt.GetoptError:
         print('Usage: ' + argv[0] + ' -i <inputFile> [options]')
         print('For more options, type: ' + argv[0] + ' -h')
@@ -44,7 +44,8 @@ Options:
     -j, --json                : export problem in JSON format
     -o, --output <outputFile> : define output file name
                                 (Default: '(LP-2)<inputFile>')
-    -p, --print               : just print the output in the console
+    -p, --print               : print the human readable output in the console
+    -s, --simple              : export the simple human readable format
     -d, --dual                : convert the problem from primal to dual form
 ''')
             sys.exit()
@@ -54,7 +55,7 @@ Options:
             outputFile = arg
         elif opt in ('-j', '--json'):
             outputFile = arg
-            exportAsJSON = True
+            exportType = 'json'
         elif opt in ('-l', '--load'):
             inputFile = arg
             loadJSON = True
@@ -62,6 +63,8 @@ Options:
             dual = True
         elif opt in ('-p', '--print'):
             justPrint = True
+        elif opt in ('-s', '--simple'):
+            exportType = 'human'
         else:
             print('Usage: ' + argv[0] + ' -i <inputFile> [options]')
             sys.exit(2)
@@ -96,21 +99,71 @@ Options:
     # Just save the data or print it.
     if not justPrint:
         # Export in the desired format.
-        if exportAsJSON:
+        if exportType == 'json':
             writeLP2json(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputFile)
+        elif exportType == 'human':
+            print('WARNING! This output is not meant for parsing, it\'s unreliable.')
+            print('It\'s only for demonstration purposes!\nUse --json for JSON format instead.')
+
+            writeLP2HumanReadable(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputFile)
         else:
             print('WARNING! This output is not meant for parsing, it\'s unreliable.')
             print('It\'s only for demonstration purposes!\nUse --json for JSON format instead.')
 
             writeLP2(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputFile)
+        
     else:
 
-        print('MinMax = ' + str(MinMax) + '\n')
-        print('c =\n' + str(c) + '\n')
-        print('A =\n' + str(A) + '\n')
-        print('Eqin =\n' + str(Eqin) + '\n')
-        print('b =\n' + str(b) + '\n')
-        print('naturalConstraints =\n' + str(naturalConstraints) + '\n')
+        if MinMax == 1:
+            print('max', end='\t')
+        elif MinMax == -1:
+            print('min', end='\t')
+        for i, coeff in enumerate(c, start=1):
+            # Ignore those with 0 coefficient
+            if coeff == 0.0:
+                print('\t', end='')
+                continue
+
+            # Put back the plus sign, unless it's the first term
+            if str(coeff)[0] != '-' and i != 1:
+                coeff = '+' + str(coeff)
+
+            print(str(coeff) +'x' + str(i), end='\t')
+        print('')
+
+        print('s.t.', end='')
+
+        # For each row
+        for i in zip(A, Eqin, b):
+            print('\t', end='')
+
+            # Enumarate each coefficient so we can name them
+            for j, coeff in enumerate(i[0], start=1):
+                # Ignore those with 0 coefficient
+                if coeff == 0.0:
+                    print('\t', end='')
+                    continue
+
+                # Put back the plus sign, unless it's the first term
+                if str(coeff)[0] != '-' and j != 1:
+                    coeff = '+' + str(coeff)
+                
+                # Printing each term
+                print(str(coeff) + 'x' + str(j), end='\t')
+
+            # Mapping the signs
+            signs = {'0': '= ', '1':'>=', '-1':'<='}
+            
+            print(signs[str(squeeze(i[1]))] + ' ' + str(squeeze(i[2])), end='\n')
+
+        # Mapping the signs
+        signs = {'0': 'free', '1':'>= 0', '-1':'<= 0'}
+        for i, constr in enumerate(naturalConstraints, start=1):
+            # Printing each constraint
+            print('x' + str(i) + ' ' + signs[str(squeeze(constr))], end='')
+            if i != len(naturalConstraints):
+                print(', ', end='')
+        print('\n')
 
 
 if __name__ == '__main__':
