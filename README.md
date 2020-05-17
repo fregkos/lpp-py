@@ -19,7 +19,8 @@ python3 lpp.py -i LP01.LTX
     -j, --json                : export problem in JSON format
     -o, --output <outputFile> : define output file name
                                 (Default: '(LP-2)<inputFile>')
-    -p, --print               : just print the output in the console
+    -p, --print               : print the human readable output in the console
+    -s, --simple              : export the simple human readable format
     -d, --dual                : convert the problem from primal to dual form
 ```
 
