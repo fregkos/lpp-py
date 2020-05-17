@@ -120,14 +120,24 @@ def constraintsExtractor(problem, vars):
         # Extract the coefficients from the first part (0).
         leftPartCoefficients = coefficientsExtractor(Ab[0], vars)
         
-        # Check for each constraint if it's correctly defined.
-        if sum(leftPartCoefficients) == 0:
-            # We explicitly want one constraint per line,
-            # so if more than one is found or none, raise an exception.
-            # Remember, every expression is initiallized as a zero matrix,
-            # thus is none found, i.e. '<=5' then the A = [0 0 0] for that line
-            # if we have 3 variables and the b = [5], with Eqin = [-1]
-            # That's why we use the sum of that row to indentify an input error.
+        ## Checks for correct definition of each constraint.
+
+        # We assume left part is invalid
+        invalidLeftPart = True
+        # We check if that is true for every coefficient.
+        for coeff in leftPartCoefficients:
+            
+            # If at least one coefficient is non-zero, that means there is no problem.
+            if coeff != 0:
+                invalidLeftPart = False
+
+        # Remember, every expression's left part is initiallized as a zero matrix,
+        # thus if none found, every coefficient is zero and invalid.
+        # For example if that line has only '<=5'. Then we get A = [0 0 0] for that line
+        # assuming we have 3 variables and the b = [5], with Eqin = [-1].
+        # We can't simply check the sum of the array, because there are multiple ways
+        # for a zero sum, i.e. A = [ 1 0 -1], which is a valid left part.
+        if invalidLeftPart:
             raise Exception('Constraint No {} has no left part and it\'s invalid.' .format(constraintNo))
 
         A.append(leftPartCoefficients)
