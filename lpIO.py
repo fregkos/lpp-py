@@ -100,6 +100,80 @@ def writeLP2(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputName=''
         output.write('b =\n' + str(array(b).reshape(len(b), 1)) + '\n\n')  # m x 1
         output.write('naturalConstraints =\n' + str(squeeze(array(naturalConstraints).reshape(1, len(naturalConstraints))).tolist()) + '\n\n')  # 1 x n
 
+def writeLP2HumanReadable(MinMax, c, A, Eqin, b, naturalConstraints, inputFile, outputName=''):
+    """
+    Description
+        Writes the linear problem to a file in a human readable form.
+    Input
+        MinMax               problem type
+        c                    objective function's coefficients numpy.array
+        A                    constraints' coefficients numpy.array
+        Eqin                 constraints' types numpy.array
+        b                    constraints' constants numpy.array
+        naturalConstraints   (optional) natural constraints' types numpy.array
+        inputFile            input file name
+        outputName           (optional) output file name
+    Output
+        A file which describes the problem in a human readable form.
+    """
+    if outputName == '':
+        outputName = '(LP-2) ' + inputFile
+    with open(outputName, 'w+') as output:
+
+        if MinMax == 1:
+            output.write('max\t')
+        elif MinMax == -1:
+            output.write('min\t')
+
+        # Enumarate each coefficient so we can name them
+        for i, coeff in enumerate(c, start=1):
+            # Ignore those with 0 coefficient
+            if coeff == 0:
+                output.write('\t')
+                continue
+
+            # Put back the plus sign, unless it's the first term
+            if str(coeff)[0] != '-' and i != 1:
+                coeff = '+' + str(coeff)
+
+            output.write(str(coeff) +'x' + str(i) + '\t')
+        output.write('\n')
+
+        output.write('s.t.')
+
+        # For each row
+        for i in zip(A, Eqin, b):
+            output.write('\t')
+
+            # Enumarate each coefficient so we can name them
+            for j, coeff in enumerate(i[0], start=1):
+                # Ignore those with 0 coefficient
+                if coeff == 0.0:
+                    output.write('\t')
+                    continue
+
+                # Put back the plus sign, unless it's the first term
+                if str(coeff)[0] != '-' and j != 1:
+                    coeff = '+' + str(coeff)
+                
+                # Writting each term
+                output.write(str(coeff) + 'x' + str(j) + '\t')
+            
+            # Mapping the signs
+            signs = {'0': '= ', '1':'>=', '-1':'<='}
+            
+            output.write(signs[str(squeeze(i[1]))] + ' ' + str(squeeze(i[2])) + '\n')
+
+        # Mapping the signs
+        signs = {'0': 'free', '1':'>= 0', '-1':'<= 0'}
+        for i, constr in enumerate(naturalConstraints, start=1):
+            # Writting each constraint
+            
+            output.write('x' + str(i) + ' ' + signs[str(squeeze(constr))])
+            if i != len(naturalConstraints):
+                output.write(', ')
+        output.write('\n')
+
 """
 JSON-related
 """
